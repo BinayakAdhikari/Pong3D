@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="jogl-all-android-natives-windows-amd64">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/Downloads/jogl/jogl-all-android-natives-windows-amd64.jar!/" />
+      <root url="jar://$USER_HOME$/Downloads/jogl/gluegen-rt-android-natives-windows-amd64.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

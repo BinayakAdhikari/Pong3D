@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="gluegen-rt-android-natives-windows-amd64">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/Downloads/jogl/gluegen-rt-android-natives-windows-amd64.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
