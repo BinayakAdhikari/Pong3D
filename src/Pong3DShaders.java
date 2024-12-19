@@ -10,13 +10,18 @@ import javax.imageio.ImageIO;
 import javax.swing.*;
 
 import com.jogamp.common.nio.Buffers;
-import com.jogamp.opengl.*;
-
+import com.jogamp.opengl.GLAutoDrawable;
+import com.jogamp.opengl.GLCapabilities;
+import com.jogamp.opengl.GLEventListener;
+import com.jogamp.opengl.GLProfile;
+import com.jogamp.opengl.GL3;
+import com.jogamp.opengl.GL;
 import com.jogamp.opengl.awt.GLCanvas;
 import com.jogamp.opengl.math.Matrix4f;
 import com.jogamp.opengl.util.FPSAnimator;
 
-public class Pong3D {
+
+public class Pong3DShaders {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(new Runnable() {
             public void run() {
@@ -31,7 +36,7 @@ class MyGui extends JFrame implements GLEventListener {
     private Game game;
 
     public void createGUI() {
-        setTitle("PongShaders");
+        setTitle("PongShaders3D");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         GLProfile glp = GLProfile.getDefault();
@@ -44,7 +49,7 @@ class MyGui extends JFrame implements GLEventListener {
         ani.start();
 
         getContentPane().setPreferredSize(new Dimension(800, 450));
-        getContentPane().add(canvas);
+        getContentPane().add(canvas, BorderLayout.CENTER);
         pack();
         setVisible(true);
         canvas.requestFocus();
@@ -52,7 +57,7 @@ class MyGui extends JFrame implements GLEventListener {
 
     @Override
     public void init(GLAutoDrawable d) {
-        GL4 gl = d.getGL().getGL4(); // get the OpenGL 2 graphics context
+        GL3 gl = d.getGL().getGL3(); // get the OpenGL 2 graphics context
         // enable depth test
         gl.glEnable(gl.GL_DEPTH_TEST);
 
@@ -60,7 +65,6 @@ class MyGui extends JFrame implements GLEventListener {
         float aspect = 16.0f / 9.0f;
         // this function replaces gluPerspective
         game.projection.setToPerspective(60.0f * (float) Math.PI / 180f, aspect, 1.5f, 5.5f);
-
         game.init(d);
     }
 
@@ -85,11 +89,7 @@ class Game extends KeyAdapter {
     boolean pauseGame = true;
     VBOLoader vboLoader = new VBOLoader();
     Matrix4f projection = new Matrix4f();
-
-    float[] lightDirection = new float[]{0, 0, -1};
-    float metalicness = 0.0f;
-    float roughness = 0.1f;
-    boolean followBall = false;
+    ShaderLoader shaderLoader = new ShaderLoader();
 
     // gameobjects
     Player playerOne;
@@ -145,7 +145,7 @@ class Game extends KeyAdapter {
         Score.vertNos = vertNos;
 
         // load shaders
-        ShaderLoader.setupShaders(d);
+        shaderLoader.setupShaders(d);
 
         // setup textures
         court.texID = Util.loadTexture(d, "src/interstellar.png");
@@ -161,13 +161,12 @@ class Game extends KeyAdapter {
     }
 
     public void display(GLAutoDrawable d) {
-        GL3 gl = d.getGL().getGL3(); // Get the OpenGL 3 graphics context
+        GL3 gl = d.getGL().getGL3();
 
-        // Clear the screen
+        // clear the screen
         gl.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         gl.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
 
-        // Use the shader program
         gl.glUseProgram(ShaderLoader.progID);
 
         // Load the current projection matrix into the corresponding UNIFORM
@@ -175,25 +174,21 @@ class Game extends KeyAdapter {
         projection.get(projectionBuffer); // Get Matrix4f into buffer in column-major order
         gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, projectionBuffer);
 
+        // Set the projection matrix
+        float[] matrixArray = new float[16]; // Create a float array to hold the matrix data
+        projection.get(matrixArray); // Get the matrix data into the array
+
         // Set additional uniforms
-        gl.glUniform3f(ShaderLoader.lightDirectionLoc, lightDirection[0], lightDirection[1], lightDirection[2]);
-        gl.glUniform1f(ShaderLoader.metallicLoc, metalicness);
-        gl.glUniform1f(ShaderLoader.roughnessLoc, roughness);
+        gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, matrixArray, 0);
 
         // Render each game object
         for (GameObject gameObject : gameObjects) {
             gameObject.display(gl);
         }
-
-        gl.glFlush(); // Flush rendering pipeline
+        gl.glFlush();
     }
 
     public void update() {
-        // update light direction
-        if (followBall) {
-            lightDirection = new float[]{ball.posX, ball.posX, -2};
-        }
-
         for (GameObject gameObject : gameObjects) {
             gameObject.update();
         }
@@ -330,46 +325,6 @@ class Game extends KeyAdapter {
                     startGame();
                 }
                 break;
-            case KeyEvent.VK_0:
-                lightDirection = new float[]{0, 0, -1};
-                followBall = false;
-                break;
-            case KeyEvent.VK_1:
-                lightDirection = new float[]{0, -1, 0};
-                followBall = false;
-                break;
-            case KeyEvent.VK_2:
-                lightDirection = new float[]{0, 1, 0};
-                followBall = false;
-                break;
-            case KeyEvent.VK_3:
-                lightDirection = new float[]{-1, -1, 0};
-                followBall = false;
-                break;
-            case KeyEvent.VK_4:
-                followBall = true;
-                break;
-            //ich habe die aufgabestellung nicht genau verstanden, also falls das licht immer in richtung -Z zeigen soll hab ich es so gemacht.
-            case KeyEvent.VK_5:
-                lightDirection = new float[]{0, 0, -1};
-                followBall = false;
-                metalicness = 0.0f;
-                break;
-            case KeyEvent.VK_6:
-                lightDirection = new float[]{0, 0, -1};
-                followBall = false;
-                metalicness = 1.0f;
-                break;
-            case KeyEvent.VK_7:
-                lightDirection = new float[]{0, 0, -1};
-                followBall = false;
-                roughness = 0.1f;
-                break;
-            case KeyEvent.VK_8:
-                lightDirection = new float[]{0, 0, -1};
-                followBall = false;
-                roughness = 0.2f;
-                break;
         }
     }
 
@@ -396,7 +351,6 @@ abstract class GameObject {
     int vertNo;
     int texID;
     boolean isBox = false;
-    boolean shading = true;
 
     Matrix4f modelview = new Matrix4f();
     float angleX, angleY, angleZ;
@@ -411,7 +365,7 @@ abstract class GameObject {
         Matrix4f scaleMatrix = new Matrix4f().setToScale(sizeX, sizeY, sizeZ); // Create a scale matrix
         modelview.mul(scaleMatrix); // Combine translation and scaling
 
-// Apply rotation transformations
+        // Apply rotation transformations
         angleZ += rotationZ;
         Matrix4f rotationZMatrix = new Matrix4f().setToRotationAxis((float) Math.toRadians(angleZ), 0, 0, 1); // Z-axis rotation
         modelview.mul(rotationZMatrix);
@@ -428,19 +382,14 @@ abstract class GameObject {
         modelview.get(modelviewBuffer);
         gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelviewBuffer);
 
-        // Prepare normal matrix (transpose and inverse of modelview matrix)
-        Matrix4f normalMatrix = new Matrix4f(modelview);
-        normalMatrix.transpose();
-        normalMatrix.invert();
+        // Assuming modelview is an instance of Matrix4f
+        float[] modelviewMatrixData = new float[16];  // Create an array to hold the matrix data
+        modelview.get(modelviewMatrixData);  // Get the matrix data into the array
 
-        FloatBuffer normalBuffer = FloatBuffer.allocate(16);
-        normalMatrix.get(normalBuffer);
-        gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, normalBuffer);
+        // Now use gl.glUniformMatrix4fv to send the matrix data to OpenGL
+        gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelviewMatrixData, 0);
 
-        // Disable shading for the skybox
-        gl.glUniform1i(ShaderLoader.shadingLoc, shading ? 1 : 0);
-
-        // Setup texture
+        // setup texture
         gl.glEnable(GL3.GL_TEXTURE_2D);
         gl.glActiveTexture(GL3.GL_TEXTURE0);
         gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
@@ -465,12 +414,11 @@ abstract class GameObject {
         gl.glVertexAttribPointer(ShaderLoader.texCoordLoc, 2, GL3.GL_FLOAT, false, stride, offset);
         gl.glEnableVertexAttribArray(ShaderLoader.texCoordLoc);
 
-        // Normals
+        // normals
         offset = (3 + 4 + 2) * Buffers.SIZEOF_FLOAT;
         gl.glVertexAttribPointer(ShaderLoader.normalLoc, 3, GL3.GL_FLOAT, false, stride, offset);
         gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
 
-        // Draw the object
         if (isBox) {
             gl.glDrawArrays(GL3.GL_QUADS, 0, vertNo);
         } else {
@@ -481,7 +429,6 @@ abstract class GameObject {
     }
 
     public void update() {
-        // Abstract update method for derived classes
     }
 }
 
@@ -644,7 +591,6 @@ class Court extends GameObject {
         this.rotationY = -0.005f;
         this.sizeX = this.sizeY = this.sizeZ = 2f;
         this.isBox = true;
-        this.shading = false;
     }
 
     public void update() {
@@ -889,6 +835,8 @@ class VBOLoader {
 
 class ShaderLoader {
     static int progID = 0;
+    int textVertID = 0;
+    int textFragID = 0;
 
     static int vertexLoc = 0;
     static int colorLoc = 0;
@@ -896,18 +844,13 @@ class ShaderLoader {
     static int normalLoc = 0;
     static int projectionLoc = 0;
     static int modelviewLoc = 0;
-    static int normalMatLoc = 0;
     static int texLoc = 0;
-    static int lightDirectionLoc = 0;
-    static int shadingLoc = 0;
-    static int metallicLoc = 0;
-    static int roughnessLoc = 0;
 
-    public static void setupShaders(GLAutoDrawable d) {
+    public void setupShaders(GLAutoDrawable d) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
 
-        int textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
-        int textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
+        textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
+        textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
 
         String[] vs = loadShaderSrc("src/texture.vert");
         String[] fs = loadShaderSrc("src/texture.frag");
@@ -948,32 +891,29 @@ class ShaderLoader {
         texCoordLoc = gl.glGetAttribLocation(progID, "inputTexCoord");
         normalLoc = gl.glGetAttribLocation(progID, "inputNormal");
 
-        // "projection" and "modelview" are user-provided
-        // UNIFORM variables of the vertex shader.
-        // Their locations are stored to be used later
         projectionLoc = gl.glGetUniformLocation(progID, "projection");
         modelviewLoc = gl.glGetUniformLocation(progID, "modelview");
-        normalMatLoc = gl.glGetUniformLocation(progID, "normalMat");
         texLoc = gl.glGetUniformLocation(progID, "myTexture");
-        lightDirectionLoc = gl.glGetUniformLocation(progID, "lightDirection");
-        shadingLoc = gl.glGetUniformLocation(progID, "shading");
-        metallicLoc = gl.glGetUniformLocation(progID, "metallic");
-        roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
     }
 
     private static void printShaderInfoLog(GLAutoDrawable d, int obj) {
-        GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
-        IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
-        int infoLogLength;
-        gl.glGetShaderiv(obj, GL3.GL_INFO_LOG_LENGTH, infoLogLengthBuf);
-        infoLogLength = infoLogLengthBuf.get(0);
-        if (infoLogLength > 0) {
-            ByteBuffer byteBuffer = ByteBuffer.allocate(infoLogLength);
-            gl.glGetShaderInfoLog(obj, infoLogLength, infoLogLengthBuf, byteBuffer);
-            for (byte b : byteBuffer.array()) {
-                System.err.print((char) b);
+        try {
+            GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
+            IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
+            int infoLogLength;
+            gl.glGetShaderiv(obj, GL3.GL_INFO_LOG_LENGTH, infoLogLengthBuf);
+            infoLogLength = infoLogLengthBuf.get(0);
+            if (infoLogLength > 0) {
+                ByteBuffer byteBuffer = ByteBuffer.allocate(infoLogLength);
+                gl.glGetShaderInfoLog(obj, infoLogLength, infoLogLengthBuf, byteBuffer);
+                for (byte b : byteBuffer.array()) {
+                    System.err.print((char) b);
+                }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
+
     }
 
     private static void printProgramInfoLog(GLAutoDrawable d, int obj) {
