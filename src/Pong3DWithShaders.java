@@ -16,13 +16,14 @@ import com.jogamp.opengl.GLEventListener;
 import com.jogamp.opengl.GLProfile;
 import com.jogamp.opengl.GL3;
 import com.jogamp.opengl.GL;
+
 import com.jogamp.opengl.awt.GLCanvas;
 import com.jogamp.opengl.math.Matrix4f;
 import com.jogamp.opengl.util.FPSAnimator;
 
-
 public class Pong3DWithShaders {
     public static void main(String[] args) {
+        System.setProperty("sun.java2d.uiScale", "1.0");
         SwingUtilities.invokeLater(new Runnable() {
             public void run() {
                 MyGui myGUI = new MyGui();
@@ -36,7 +37,7 @@ class MyGui extends JFrame implements GLEventListener {
     private Game game;
 
     public void createGUI() {
-        setTitle("PongShaders3D");
+        setTitle("PongShaders");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         GLProfile glp = GLProfile.getDefault();
@@ -49,7 +50,7 @@ class MyGui extends JFrame implements GLEventListener {
         ani.start();
 
         getContentPane().setPreferredSize(new Dimension(800, 450));
-        getContentPane().add(canvas, BorderLayout.CENTER);
+        getContentPane().add(canvas);
         pack();
         setVisible(true);
         canvas.requestFocus();
@@ -64,7 +65,8 @@ class MyGui extends JFrame implements GLEventListener {
         // setup camera
         float aspect = 16.0f / 9.0f;
         // this function replaces gluPerspective
-        game.projection.setToPerspective(60.0f * (float) Math.PI / 180f, aspect, 1.5f, 5.5f);
+        game.projection.setToPerspective((float) Math.toRadians(60.0f), aspect, 1.5f, 5.5f);
+
         game.init(d);
     }
 
@@ -161,27 +163,15 @@ class Game extends KeyAdapter {
     }
 
     public void display(GLAutoDrawable d) {
-        GL3 gl = d.getGL().getGL3();
+        GL3 gl = d.getGL().getGL3(); // get the OpenGL 2 graphics context
 
         // clear the screen
         gl.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         gl.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
 
         gl.glUseProgram(ShaderLoader.progID);
-
-        // Load the current projection matrix into the corresponding UNIFORM
-        FloatBuffer projectionBuffer = FloatBuffer.allocate(16); // Allocate buffer for 4x4 matrix
-        projection.get(projectionBuffer); // Get Matrix4f into buffer in column-major order
-        gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, projectionBuffer);
-
-        // Set the projection matrix
-        float[] matrixArray = new float[16]; // Create a float array to hold the matrix data
-        projection.get(matrixArray); // Get the matrix data into the array
-
-        // Set additional uniforms
-        gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, matrixArray, 0);
-
-        // Render each game object
+        // load the current projection matrix into the corresponding UNIFORM
+        gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, projection.get(new float[16]), 0);
         for (GameObject gameObject : gameObjects) {
             gameObject.display(gl);
         }
@@ -358,88 +348,63 @@ abstract class GameObject {
     float posX, posY;
     float sizeX, sizeY, sizeZ;
 
-    // Displays the object using OpenGL context
     public void display(GL3 gl) {
-        try {
-            // Initialize modelview matrix and apply translation
-            modelview.loadIdentity();
-            modelview.setToTranslation(posX, posY, -2.0f);
-            Matrix4f scaleMatrix = new Matrix4f().setToScale(sizeX, sizeY, sizeZ);
-            modelview.mul(scaleMatrix);
 
-            // Apply Z-axis rotation
-            angleZ += rotationZ;
-            Matrix4f rotationZMatrix = new Matrix4f().setToRotationAxis((float) Math.toRadians(angleZ), 0, 0, 1);
-            modelview.mul(rotationZMatrix);
+        // setup modelview transformation
+        modelview.loadIdentity();
+        modelview.translate(posX, posY, -2.0f, new Matrix4f());
+        modelview.scale(sizeX, sizeY, sizeZ, new Matrix4f());
+        modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
+        modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
+        modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
 
-            // Apply X-axis rotation
-            Matrix4f rotationXMatrix = new Matrix4f().setToRotationAxis((float) Math.toRadians(angleX), 1, 0, 0);
-            modelview.mul(rotationXMatrix);
+        gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelview.get(new float[16]), 0);
 
-            // Apply Y-axis rotation
-            angleY += rotationY;
-            Matrix4f rotationYMatrix = new Matrix4f().setToRotationAxis((float) Math.toRadians(angleY), 0, 1, 0);
-            modelview.mul(rotationYMatrix);
+        // setup texture
+        gl.glEnable(GL3.GL_TEXTURE_2D);
+        // activate texture unit 0
+        gl.glActiveTexture(GL3.GL_TEXTURE0);
+        // bind texture
+        gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
+        // inform the shader to use texture unit 0
+        gl.glUniform1i(ShaderLoader.texLoc, 0);
 
-            // Send modelview matrix to shader program
-            float[] modelviewMatrixData = new float[16];
-            modelview.get(modelviewMatrixData);
-            gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelviewMatrixData, 0);
 
-            // Enable and bind texture
-            gl.glEnable(GL3.GL_TEXTURE_2D);
-            gl.glActiveTexture(GL3.GL_TEXTURE0);
-            gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
-            gl.glUniform1i(ShaderLoader.texLoc, 0);
+        // activate VBO
+        gl.glBindBuffer(GL3.GL_ARRAY_BUFFER, vertBufID);
+        int stride = (3 + 4 + 2 + 3) * Buffers.SIZEOF_FLOAT;
+        int offset = 0;
 
-            // Bind vertex buffer object and set up vertex attributes
-            gl.glBindBuffer(GL3.GL_ARRAY_BUFFER, vertBufID);
-            int stride = (3 + 4 + 2 + 3) * Buffers.SIZEOF_FLOAT;
-            int offset = 0;
+        // position
+        gl.glVertexAttribPointer(ShaderLoader.vertexLoc, 3, GL3.GL_FLOAT, false, stride, offset);
+        gl.glEnableVertexAttribArray(ShaderLoader.vertexLoc);
 
-            // Specify vertex positions
-            gl.glVertexAttribPointer(ShaderLoader.vertexLoc, 3, GL3.GL_FLOAT, false, stride, offset);
-            gl.glEnableVertexAttribArray(ShaderLoader.vertexLoc);
+        // color
+        offset = 3 * Buffers.SIZEOF_FLOAT;
+        gl.glVertexAttribPointer(ShaderLoader.colorLoc, 4, GL3.GL_FLOAT, false, stride, offset);
+        gl.glEnableVertexAttribArray(ShaderLoader.colorLoc);
 
-            // Specify vertex colors
-            offset = 3 * Buffers.SIZEOF_FLOAT;
-            gl.glVertexAttribPointer(ShaderLoader.colorLoc, 4, GL3.GL_FLOAT, false, stride, offset);
-            gl.glEnableVertexAttribArray(ShaderLoader.colorLoc);
+        // texture
+        offset = (3 + 4) * Buffers.SIZEOF_FLOAT;
+        gl.glVertexAttribPointer(ShaderLoader.texCoordLoc, 2, GL3.GL_FLOAT, false, stride, offset);
+        gl.glEnableVertexAttribArray(ShaderLoader.texCoordLoc);
 
-            // Specify texture coordinates
-            offset = (3 + 4) * Buffers.SIZEOF_FLOAT;
-            gl.glVertexAttribPointer(ShaderLoader.texCoordLoc, 2, GL3.GL_FLOAT, false, stride, offset);
-            gl.glEnableVertexAttribArray(ShaderLoader.texCoordLoc);
+        // normals
+        offset = (3 + 4 + 2) * Buffers.SIZEOF_FLOAT;
+        gl.glVertexAttribPointer(ShaderLoader.normalLoc, 3, GL3.GL_FLOAT, false, stride, offset);
+        gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
 
-            // Specify normal vectors
-            offset = (3 + 4 + 2) * Buffers.SIZEOF_FLOAT;
-            gl.glVertexAttribPointer(ShaderLoader.normalLoc, 3, GL3.GL_FLOAT, false, stride, offset);
-            gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
-
-            // Draw object as quads or triangles
-            if (isBox) {
-                gl.glDrawArrays(GL3.GL_QUADS, 0, vertNo);
-            } else {
-                gl.glDrawArrays(GL3.GL_TRIANGLES, 0, vertNo);
-            }
-
-            // Disable texture mapping after drawing
-            gl.glDisable(GL3.GL_TEXTURE_2D);
-        } catch (Exception e) {
-            System.err.println("Error during display: " + e.getMessage());
-            e.printStackTrace();
+        if (isBox) {
+            gl.glDrawArrays(GL3.GL_QUADS, 0, vertNo);
+        } else {
+            // render data
+            gl.glDrawArrays(GL3.GL_TRIANGLES, 0, vertNo);
         }
+
+        gl.glDisable(GL3.GL_TEXTURE_2D);
     }
 
-    // Updates the object's properties, placeholder for derived classes
     public void update() {
-        try {
-            // Placeholder: Implement update logic in derived classes
-            System.out.println("Update method called for GameObject.");
-        } catch (Exception e) {
-            System.err.println("Error during update: " + e.getMessage());
-            e.printStackTrace();
-        }
     }
 }
 
@@ -510,6 +475,9 @@ class Ball extends GameObject {
     public void update() {
         this.posX += velocityX;
         this.posY += velocityY;
+
+        // Update rotation angle
+        angleZ += rotationZ;
 
         // update collision border
         this.borderLeft = this.posX - this.scaleX;
@@ -844,12 +812,11 @@ class VBOLoader {
     }
 }
 
-class ShaderLoader{
-    static int progID = 0; // Program ID for the shader program
-    int textVertID = 0;    // Vertex shader ID
-    int textFragID = 0;    // Fragment shader ID
+class ShaderLoader {
+    static int progID = 0;
+    int textVertID = 0;
+    int textFragID = 0;
 
-    // Attribute and uniform locations
     static int vertexLoc = 0;
     static int colorLoc = 0;
     static int texCoordLoc = 0;
@@ -858,107 +825,133 @@ class ShaderLoader{
     static int modelviewLoc = 0;
     static int texLoc = 0;
 
-    // Embedded shader code
-    private static final String VERTEX_SHADER_SRC =
-            "#version 140\n" +
-                    "in vec3 inputPosition;\n" +
-                    "in vec4 inputColor;\n" +
-                    "in vec2 inputTexCoord;\n" +
-                    "in vec3 inputNormal;\n" +
-                    "uniform mat4 projection;\n" +
-                    "uniform mat4 modelview;\n" +
-                    "uniform mat4 normalMat;\n" +
-                    "out vec3 forFragColor;\n" +
-                    "out vec2 forFragTexCoord;\n" +
-                    "out vec3 normal;\n" +
-                    "out vec3 vertPos;\n" +
-                    "void main(){\n" +
-                    "    forFragColor = inputColor.rgb;\n" +
-                    "    forFragTexCoord = inputTexCoord;\n" +
-                    "    normal = (normalMat * vec4(inputNormal, 0.0)).xyz;\n" +
-                    "    vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);\n" +
-                    "    vertPos = vec3(vertPos4) / vertPos4.w;\n" +
-                    "    gl_Position = projection * modelview * vec4(inputPosition, 1.0);\n" +
-                    "}";
-
-    private static final String FRAGMENT_SHADER_SRC =
-            "#version 140\n" +
-                    "#define RECIPROCAL_PI 0.3183098861837907\n" +
-                    "out vec4 outputColor;\n" +
-                    "in vec2 forFragTexCoord;\n" +
-                    "in vec3 normal;\n" +
-                    "in vec3 vertPos;\n" +
-                    "in vec3 forFragColor;\n" +
-                    "uniform sampler2D myTexture;\n" +
-                    "uniform vec3 lightDirection;\n" +
-                    "uniform bool shading;\n" +
-                    "uniform float metallic;\n" +
-                    "uniform float roughness;\n" +
-                    "const vec4 lightColor = vec4(1.0, 1.0, 1.0, 1.0);\n" +
-                    "const float shininess = 20.0;\n" +
-                    "const float irradiPerp = 1.0;\n" +
-                    "vec3 rgb2lin(vec3 rgb) { return pow(rgb, vec3(2.2)); }\n" +
-                    "vec3 brdfMicrofacet(in vec3 L, in vec3 V, in vec3 N, in float metallic, in float roughness, in vec3 baseColor, in float reflectance) {\n" +
-                    "    vec3 H = normalize(V + L);\n" +
-                    "    float NoV = max(dot(N, V), 0.0);\n" +
-                    "    float NoL = max(dot(N, L), 0.0);\n" +
-                    "    float NoH = max(dot(N, H), 0.0);\n" +
-                    "    float VoH = max(dot(V, H), 0.0);\n" +
-                    "    vec3 f0 = vec3(0.16 * (reflectance * reflectance));\n" +
-                    "    f0 = mix(f0, baseColor, metallic);\n" +
-                    "    vec3 F = f0 + (1.0 - f0) * pow(1.0 - VoH, 5.0);\n" +
-                    "    return F;\n" +
-                    "}\n" +
-                    "void main() {\n" +
-                    "    vec3 n = normalize(normal);\n" +
-                    "    vec3 lightDir = normalize(-lightDirection);\n" +
-                    "    vec3 viewDir = normalize(-vertPos);\n" +
-                    "    vec3 baseColor = rgb2lin(forFragColor * texture(myTexture, forFragTexCoord).rgb);\n" +
-                    "    vec3 radiance = baseColor;\n" +
-                    "    float irradiance = max(dot(lightDir, n), 0.0) * irradiPerp;\n" +
-                    "    radiance += brdfMicrofacet(lightDir, viewDir, n, metallic, roughness, baseColor, 1.0) * irradiance * lightColor.rgb;\n" +
-                    "    radiance = pow(radiance, vec3(1.0 / 6.2));\n" +
-                    "    outputColor = vec4(radiance, 1.0);\n" +
-                    "}";
-
-    /**
-     * Loads, compiles, and links vertex and fragment shaders into a shader program.
-     *
-     * @param d GLAutoDrawable context for OpenGL
-     */
     public void setupShaders(GLAutoDrawable d) {
+        GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
+
+        textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
+        textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
+
+        String[] vs = new String[]{
+                "#version 140\n" +
+                        "\n" +
+                        "in vec3 inputPosition;\n" +
+                        "in vec4 inputColor;\n" +
+                        "in vec2 inputTexCoord;\n" +
+                        "in vec3 inputNormal;\n" +
+                        "\n" +
+                        "uniform mat4 projection;\n" +
+                        "uniform mat4 modelview;\n" +
+                        "\n" +
+                        "out vec3 forFragColor;\n" +
+                        "out vec2 forFragTexCoord;\n" +
+                        "\n" +
+                        "void main(){\n" +
+                        "    forFragColor = inputColor.rgb;\n" +
+                        "    forFragTexCoord = inputTexCoord;\n" +
+                        "    gl_Position =  projection * modelview * vec4(inputPosition, 1.0);\n" +
+                        "}\n" };
+
+        String[] fs = new String[]{
+                "#version 140\n" +
+                        "\n" +
+                        "in vec3 forFragColor;\n" +
+                        "in vec2 forFragTexCoord;\n" +
+                        "out vec4 outputColor;\n" +
+                        "\n" +
+                        "uniform sampler2D myTexture;\n" +
+                        "\n" +
+                        "void main() {\n" +
+                        "    vec3 textureColor = vec3( texture(myTexture, forFragTexCoord) );\n" +
+                        "    outputColor = vec4(forFragColor * textureColor ,1.0);\n" +
+                        "}\n" };
+
+        gl.glShaderSource(textVertID, 1, vs, null, 0);
+        gl.glShaderSource(textFragID, 1, fs, null, 0);
+
+        // compile the shader
+        gl.glCompileShader(textVertID);
+        gl.glCompileShader(textFragID);
+
+        // check for errors
+        printShaderInfoLog(d, textVertID);
+        printShaderInfoLog(d, textFragID);
+
+        // create program and attach shaders
+        progID = gl.glCreateProgram();
+        gl.glAttachShader(progID, textVertID);
+        gl.glAttachShader(progID, textFragID);
+
+        // "outColor" is a user-provided OUT variable
+        // of the fragment shader.
+        // Its output is bound to the first color buffer
+        // in the framebuffer
+        gl.glBindFragDataLocation(progID, 0, "outputColor");
+
+        // link the program
+        gl.glLinkProgram(progID);
+        // output error messages
+        printProgramInfoLog(d, progID);
+
+        // "inputPosition" and "inputColor" are user-provided
+        // IN variables of the vertex shader.
+        // Their locations are stored to be used later with
+        // glEnableVertexAttribArray()
+        vertexLoc = gl.glGetAttribLocation(progID, "inputPosition");
+        colorLoc = gl.glGetAttribLocation(progID, "inputColor");
+        texCoordLoc = gl.glGetAttribLocation(progID, "inputTexCoord");
+        normalLoc = gl.glGetAttribLocation(progID, "inputNormal");
+
+        // "projection" and "modelview" are user-provided
+        // UNIFORM variables of the vertex shader.
+        // Their locations are stored to be used later
+        projectionLoc = gl.glGetUniformLocation(progID, "projection");
+        modelviewLoc = gl.glGetUniformLocation(progID, "modelview");
+        texLoc = gl.glGetUniformLocation(progID, "myTexture");
+    }
+
+    static void printShaderInfoLog(GLAutoDrawable d, int obj) {
+        GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
+        IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
+        int infoLogLength;
+        gl.glGetShaderiv(obj, GL3.GL_INFO_LOG_LENGTH, infoLogLengthBuf);
+        infoLogLength = infoLogLengthBuf.get(0);
+        if (infoLogLength > 0) {
+            ByteBuffer byteBuffer = ByteBuffer.allocate(infoLogLength);
+            gl.glGetShaderInfoLog(obj, infoLogLength, infoLogLengthBuf, byteBuffer);
+            for (byte b : byteBuffer.array()) {
+                System.err.print((char) b);
+            }
+        }
+    }
+
+    static void printProgramInfoLog(GLAutoDrawable d, int obj) {
+        GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
+        IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
+        int infoLogLength;
+        gl.glGetProgramiv(obj, GL3.GL_INFO_LOG_LENGTH, infoLogLengthBuf);
+        infoLogLength = infoLogLengthBuf.get(0);
+        if (infoLogLength > 0) {
+            ByteBuffer byteBuffer = ByteBuffer.allocate(infoLogLength);
+            gl.glGetProgramInfoLog(obj, infoLogLength, infoLogLengthBuf, byteBuffer);
+            for (byte b : byteBuffer.array()) {
+                System.err.print((char) b);
+            }
+        }
+    }
+
+    public String[] loadShaderSrc(String name) {
+        StringBuilder sb = new StringBuilder();
         try {
-            GL3 gl = d.getGL().getGL3(); // Get the OpenGL 3 graphics context
-
-            // Create shader objects
-            textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
-            textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
-
-            // Attach source code to shaders
-            gl.glShaderSource(textVertID, 1, new String[]{VERTEX_SHADER_SRC}, null, 0);
-            gl.glShaderSource(textFragID, 1, new String[]{FRAGMENT_SHADER_SRC}, null, 0);
-
-            // Compile the shaders
-            gl.glCompileShader(textVertID);
-            gl.glCompileShader(textFragID);
-
-            // Create and link the shader program
-            progID = gl.glCreateProgram();
-            gl.glAttachShader(progID, textVertID);
-            gl.glAttachShader(progID, textFragID);
-            gl.glBindFragDataLocation(progID, 0, "outputColor");
-            gl.glLinkProgram(progID);
-
-            // Retrieve attribute and uniform locations
-            vertexLoc = gl.glGetAttribLocation(progID, "inputPosition");
-            colorLoc = gl.glGetAttribLocation(progID, "inputColor");
-            texCoordLoc = gl.glGetAttribLocation(progID, "inputTexCoord");
-            normalLoc = gl.glGetAttribLocation(progID, "inputNormal");
-            projectionLoc = gl.glGetUniformLocation(progID, "projection");
-            modelviewLoc = gl.glGetUniformLocation(progID, "modelview");
-            texLoc = gl.glGetUniformLocation(progID, "myTexture");
+            BufferedReader br = new BufferedReader(new FileReader(name));
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+                sb.append('\n');
+            }
+            br.close();
         } catch (Exception e) {
             e.printStackTrace();
         }
+        return new String[]{sb.toString()};
     }
 }
