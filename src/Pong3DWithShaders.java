@@ -91,7 +91,9 @@ class Game extends KeyAdapter {
     boolean pauseGame = true;
     VBOLoader vboLoader = new VBOLoader();
     Matrix4f projection = new Matrix4f();
-    ShaderLoader shaderLoader = new ShaderLoader();
+
+    float[] lightDirection = new float[]{0, 0, -1};
+    boolean followBall = true;
 
     // gameobjects
     Player playerOne;
@@ -147,7 +149,7 @@ class Game extends KeyAdapter {
         Score.vertNos = vertNos;
 
         // load shaders
-        shaderLoader.setupShaders(d);
+        ShaderLoader.setupShaders(d);
 
         // setup textures
         court.texID = Util.loadTexture(d, "src/interstellar.png");
@@ -172,6 +174,7 @@ class Game extends KeyAdapter {
         gl.glUseProgram(ShaderLoader.progID);
         // load the current projection matrix into the corresponding UNIFORM
         gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, projection.get(new float[16]), 0);
+        gl.glUniform3f(ShaderLoader.lightDirectionLoc, lightDirection[0], lightDirection[1], lightDirection[2]);
         for (GameObject gameObject : gameObjects) {
             gameObject.display(gl);
         }
@@ -179,6 +182,11 @@ class Game extends KeyAdapter {
     }
 
     public void update() {
+        // update light direction
+        if (followBall) {
+            lightDirection = new float[]{ball.posX, ball.posX, -2};
+        }
+
         for (GameObject gameObject : gameObjects) {
             gameObject.update();
         }
@@ -315,6 +323,25 @@ class Game extends KeyAdapter {
                     startGame();
                 }
                 break;
+            case KeyEvent.VK_0:
+                lightDirection = new float[]{0, 0, -1};
+                followBall = false;
+                break;
+            case KeyEvent.VK_1:
+                lightDirection = new float[]{0, -1, 0};
+                followBall = false;
+                break;
+            case KeyEvent.VK_2:
+                lightDirection = new float[]{0, 1, 0};
+                followBall = false;
+                break;
+            case KeyEvent.VK_3:
+                lightDirection = new float[]{-1, -1, 0};
+                followBall = false;
+                break;
+            case KeyEvent.VK_4:
+                followBall = true;
+                break;
         }
     }
 
@@ -341,6 +368,7 @@ abstract class GameObject {
     int vertNo;
     int texID;
     boolean isBox = false;
+    boolean shading = true;
 
     Matrix4f modelview = new Matrix4f();
     float angleX, angleY, angleZ;
@@ -349,16 +377,24 @@ abstract class GameObject {
     float sizeX, sizeY, sizeZ;
 
     public void display(GL3 gl) {
-
         // setup modelview transformation
         modelview.loadIdentity();
         modelview.translate(posX, posY, -2.0f, new Matrix4f());
         modelview.scale(sizeX, sizeY, sizeZ, new Matrix4f());
+        angleZ += rotationZ;
         modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
         modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
+        angleY += rotationY;
         modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
-
         gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelview.get(new float[16]), 0);
+
+        // rotational part of the transformation
+        modelview.transpose();
+        modelview.invert();
+        gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, modelview.get(new float[16]), 0);
+
+        // disable shading for the skybox
+        gl.glUniform1i(ShaderLoader.shadingLoc, shading ? 1 : 0);
 
         // setup texture
         gl.glEnable(GL3.GL_TEXTURE_2D);
@@ -570,6 +606,7 @@ class Court extends GameObject {
         this.rotationY = -0.005f;
         this.sizeX = this.sizeY = this.sizeZ = 2f;
         this.isBox = true;
+        this.shading = true;
     }
 
     public void update() {
@@ -814,8 +851,6 @@ class VBOLoader {
 
 class ShaderLoader {
     static int progID = 0;
-    int textVertID = 0;
-    int textFragID = 0;
 
     static int vertexLoc = 0;
     static int colorLoc = 0;
@@ -823,13 +858,16 @@ class ShaderLoader {
     static int normalLoc = 0;
     static int projectionLoc = 0;
     static int modelviewLoc = 0;
+    static int normalMatLoc = 0;
     static int texLoc = 0;
+    static int lightDirectionLoc = 0;
+    static int shadingLoc = 0;
 
-    public void setupShaders(GLAutoDrawable d) {
+    public static void setupShaders(GLAutoDrawable d) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
 
-        textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
-        textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
+        int textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
+        int textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
 
         String[] vs = new String[]{
                 "#version 140\n" +
@@ -841,29 +879,83 @@ class ShaderLoader {
                         "\n" +
                         "uniform mat4 projection;\n" +
                         "uniform mat4 modelview;\n" +
+                        "uniform mat4 normalMat;\n" +
                         "\n" +
                         "out vec3 forFragColor;\n" +
                         "out vec2 forFragTexCoord;\n" +
+                        "out vec3 normal;\n" +
+                        "out vec3 vertPos;\n" +
                         "\n" +
-                        "void main(){\n" +
+                        "void main() {\n" +
                         "    forFragColor = inputColor.rgb;\n" +
                         "    forFragTexCoord = inputTexCoord;\n" +
-                        "    gl_Position =  projection * modelview * vec4(inputPosition, 1.0);\n" +
-                        "}\n" };
+                        "    normal = normalize((normalMat * vec4(inputNormal, 0.0)).xyz);\n" +
+                        "    vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);\n" +
+                        "    vertPos = vec3(vertPos4) / vertPos4.w;\n" +
+                        "    gl_Position = projection * vertPos4;\n" +
+                        "}\n"
+        };
 
         String[] fs = new String[]{
                 "#version 140\n" +
                         "\n" +
-                        "in vec3 forFragColor;\n" +
-                        "in vec2 forFragTexCoord;\n" +
                         "out vec4 outputColor;\n" +
                         "\n" +
+                        "in vec2 forFragTexCoord;\n" +
+                        "in vec3 normal;\n" +
+                        "in vec3 vertPos;\n" +
+                        "in vec3 forFragColor;\n" +
+                        "\n" +
                         "uniform sampler2D myTexture;\n" +
+                        "uniform vec3 lightDirection;\n" +
+                        "uniform bool shading;\n" +
+                        "\n" +
+                        "const vec4 lightColor = vec4(1.0, 1.0, 1.0, 1.0);\n" +
+                        "const vec3 ambientLight = vec3(0.05, 0.05, 0.05);\n" +
+                        "const vec3 specularColor = vec3(0.3, 0.3, 0.3);\n" +
+                        "const float shininess = 20.0;\n" +
+                        "const float irradiPerp = 1.0;\n" +
+                        "\n" +
+                        "vec3 phongBRDF(\n" +
+                        "in vec3 lightDir,\n" +
+                        "in vec3 viewDir,\n" +
+                        "in vec3 normal,\n" +
+                        "in vec3 phongDiffuseCol,\n" +
+                        "in vec3 phongSpecularCol,\n" +
+                        "float phongShininess\n" +
+                        ") {\n" +
+                        "    vec3 color = phongDiffuseCol;\n" +
+                        "    vec3 reflectDir = reflect(-lightDir, normal);\n" +
+                        "    float specDot = max(dot(reflectDir, viewDir), 0.0);\n" +
+                        "    color += pow(specDot, phongShininess) * phongSpecularCol;\n" +
+                        "    return color;\n" +
+                        "}\n" +
                         "\n" +
                         "void main() {\n" +
-                        "    vec3 textureColor = vec3( texture(myTexture, forFragTexCoord) );\n" +
-                        "    outputColor = vec4(forFragColor * textureColor ,1.0);\n" +
-                        "}\n" };
+                        "    if (shading) {\n" +
+                        "        vec3 n = normalize(normal);\n" +
+                        "        vec3 lightDir = normalize(-lightDirection);\n" +
+                        "        vec3 viewDir = normalize(-vertPos);\n" +
+                        "\n" +
+                        "        vec3 textureColor = texture(myTexture, forFragTexCoord).rgb;\n" +
+                        "        vec3 diffuseColor = forFragColor * textureColor;\n" +
+                        "        diffuseColor = pow(diffuseColor, vec3(2.2));\n" +
+                        "        vec3 radiance = ambientLight * diffuseColor;\n" +
+                        "\n" +
+                        "        float irradiance = max(dot(lightDir, n), 0.0) * irradiPerp;\n" +
+                        "        if (irradiance > 0.0) {\n" +
+                        "            vec3 brdf = phongBRDF(lightDir, viewDir, n, diffuseColor, specularColor, shininess);\n" +
+                        "            radiance += brdf * irradiance * lightColor.rgb;\n" +
+                        "        }\n" +
+                        "\n" +
+                        "        radiance = pow(radiance, vec3(1.0 / 2.2));\n" +
+                        "        outputColor = vec4(radiance, 1.0);\n" +
+                        "    } else {\n" +
+                        "        vec3 textureColor = forFragColor * texture(myTexture, forFragTexCoord).rgb;\n" +
+                        "        outputColor = vec4(textureColor, 1.0);\n" +
+                        "    }\n" +
+                        "}\n"
+        };
 
         gl.glShaderSource(textVertID, 1, vs, null, 0);
         gl.glShaderSource(textFragID, 1, fs, null, 0);
@@ -906,7 +998,10 @@ class ShaderLoader {
         // Their locations are stored to be used later
         projectionLoc = gl.glGetUniformLocation(progID, "projection");
         modelviewLoc = gl.glGetUniformLocation(progID, "modelview");
+        normalMatLoc = gl.glGetUniformLocation(progID, "normalMat");
         texLoc = gl.glGetUniformLocation(progID, "myTexture");
+        lightDirectionLoc = gl.glGetUniformLocation(progID, "lightDirection");
+        shadingLoc = gl.glGetUniformLocation(progID, "shading");
     }
 
     static void printShaderInfoLog(GLAutoDrawable d, int obj) {

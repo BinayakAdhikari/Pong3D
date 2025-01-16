@@ -23,7 +23,7 @@ void main() {
     forFragTexCoord = inputTexCoord;
 
     // Transform the normal vector
-    normal = (normalMat * vec4(inputNormal, 0.0)).xyz;
+    normal = normalize((normalMat * vec4(inputNormal, 0.0)).xyz);
 
     // Transform the vertex position
     vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);
