@@ -65,7 +65,7 @@ class MyGui extends JFrame implements GLEventListener {
         // setup camera
         float aspect = 16.0f / 9.0f;
         // this function replaces gluPerspective
-        game.projection.setToPerspective((float) Math.toRadians(60.0f), aspect, 1.5f, 5.5f);
+        game.projection.setToPerspective(60.0f * (float) Math.PI / 180f, aspect, 1.5f, 5.5f);
 
         game.init(d);
     }
@@ -92,8 +92,11 @@ class Game extends KeyAdapter {
     VBOLoader vboLoader = new VBOLoader();
     Matrix4f projection = new Matrix4f();
 
-    float[] lightDirection = new float[]{0, 0, -1};
-    boolean followBall = true;
+    float[] lightDirection = new float[]{-1, -1, -1};
+    boolean followBall = false;
+
+    public float metallic = 0.0f;
+    public float roughness = 0.5f; // Default roughness value
 
     // gameobjects
     Player playerOne;
@@ -103,6 +106,8 @@ class Game extends KeyAdapter {
     Ball ball;
     PowerUp powerUp;
     Court court;
+
+    public int shading = 1;
 
     ArrayList<GameObject> gameObjects = new ArrayList<>();
 
@@ -172,9 +177,19 @@ class Game extends KeyAdapter {
         gl.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
 
         gl.glUseProgram(ShaderLoader.progID);
+
+        gl.glUniform1f(ShaderLoader.metallicLoc, metallic);
+        gl.glUniform1f(ShaderLoader.roughnessLoc, roughness);
+
         // load the current projection matrix into the corresponding UNIFORM
         gl.glUniformMatrix4fv(ShaderLoader.projectionLoc, 1, false, projection.get(new float[16]), 0);
         gl.glUniform3f(ShaderLoader.lightDirectionLoc, lightDirection[0], lightDirection[1], lightDirection[2]);
+
+        for (GameObject gobj : gameObjects) {
+            gobj.shading = shading;
+        }
+        court.shading = 0;
+
         for (GameObject gameObject : gameObjects) {
             gameObject.display(gl);
         }
@@ -342,6 +357,18 @@ class Game extends KeyAdapter {
             case KeyEvent.VK_4:
                 followBall = true;
                 break;
+            case KeyEvent.VK_5:
+                metallic = 0.0f;
+                break;
+            case KeyEvent.VK_6:
+                metallic = 1.0f;
+                break;
+            case KeyEvent.VK_7:
+                roughness = 0.1f;
+                break;
+            case KeyEvent.VK_8:
+                roughness = 0.2f;
+                break;
         }
     }
 
@@ -368,7 +395,7 @@ abstract class GameObject {
     int vertNo;
     int texID;
     boolean isBox = false;
-    boolean shading = true;
+    int shading = 1;
 
     Matrix4f modelview = new Matrix4f();
     float angleX, angleY, angleZ;
@@ -394,7 +421,7 @@ abstract class GameObject {
         gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, modelview.get(new float[16]), 0);
 
         // disable shading for the skybox
-        gl.glUniform1i(ShaderLoader.shadingLoc, shading ? 1 : 0);
+        gl.glUniform1i(ShaderLoader.shadingLoc, shading);
 
         // setup texture
         gl.glEnable(GL3.GL_TEXTURE_2D);
@@ -606,7 +633,7 @@ class Court extends GameObject {
         this.rotationY = -0.005f;
         this.sizeX = this.sizeY = this.sizeZ = 2f;
         this.isBox = true;
-        this.shading = true;
+        this.shading = 1;
     }
 
     public void update() {
@@ -862,6 +889,8 @@ class ShaderLoader {
     static int texLoc = 0;
     static int lightDirectionLoc = 0;
     static int shadingLoc = 0;
+    static int metallicLoc = 0;
+    static int roughnessLoc = 0;
 
     public static void setupShaders(GLAutoDrawable d) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
@@ -869,92 +898,137 @@ class ShaderLoader {
         int textVertID = gl.glCreateShader(GL3.GL_VERTEX_SHADER);
         int textFragID = gl.glCreateShader(GL3.GL_FRAGMENT_SHADER);
 
+        metallicLoc = gl.glGetUniformLocation(progID, "metallic");
+        roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
+
         String[] vs = new String[]{
-                "#version 140\n" +
-                        "\n" +
-                        "in vec3 inputPosition;\n" +
-                        "in vec4 inputColor;\n" +
-                        "in vec2 inputTexCoord;\n" +
-                        "in vec3 inputNormal;\n" +
-                        "\n" +
-                        "uniform mat4 projection;\n" +
-                        "uniform mat4 modelview;\n" +
-                        "uniform mat4 normalMat;\n" +
-                        "\n" +
-                        "out vec3 forFragColor;\n" +
-                        "out vec2 forFragTexCoord;\n" +
-                        "out vec3 normal;\n" +
-                        "out vec3 vertPos;\n" +
-                        "\n" +
-                        "void main() {\n" +
-                        "    forFragColor = inputColor.rgb;\n" +
-                        "    forFragTexCoord = inputTexCoord;\n" +
-                        "    normal = normalize((normalMat * vec4(inputNormal, 0.0)).xyz);\n" +
-                        "    vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);\n" +
-                        "    vertPos = vec3(vertPos4) / vertPos4.w;\n" +
-                        "    gl_Position = projection * vertPos4;\n" +
-                        "}\n"
+            """
+                #version 140
+                in vec3 inputPosition;
+                in vec4 inputColor;
+                in vec2 inputTexCoord;
+                in vec3 inputNormal;
+                uniform mat4 projection;
+                uniform mat4 modelview;
+                uniform mat4 normalMat;
+                out vec3 forFragColor;
+                out vec2 forFragTexCoord;
+                out vec3 normal;
+                out vec3 vertPos;
+                void main(){
+                    forFragColor = inputColor.rgb;
+                    forFragTexCoord = inputTexCoord;
+                    normal = (normalMat * vec4(inputNormal, 0.0)).xyz;
+                    vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);
+                    vertPos = vec3(vertPos4) / vertPos4.w;
+                    gl_Position =  projection * modelview * vec4(inputPosition, 1.0);
+                }
+            """
         };
 
         String[] fs = new String[]{
-                "#version 140\n" +
-                        "\n" +
-                        "out vec4 outputColor;\n" +
-                        "\n" +
-                        "in vec2 forFragTexCoord;\n" +
-                        "in vec3 normal;\n" +
-                        "in vec3 vertPos;\n" +
-                        "in vec3 forFragColor;\n" +
-                        "\n" +
-                        "uniform sampler2D myTexture;\n" +
-                        "uniform vec3 lightDirection;\n" +
-                        "uniform bool shading;\n" +
-                        "\n" +
-                        "const vec4 lightColor = vec4(1.0, 1.0, 1.0, 1.0);\n" +
-                        "const vec3 ambientLight = vec3(0.05, 0.05, 0.05);\n" +
-                        "const vec3 specularColor = vec3(0.3, 0.3, 0.3);\n" +
-                        "const float shininess = 20.0;\n" +
-                        "const float irradiPerp = 1.0;\n" +
-                        "\n" +
-                        "vec3 phongBRDF(\n" +
-                        "in vec3 lightDir,\n" +
-                        "in vec3 viewDir,\n" +
-                        "in vec3 normal,\n" +
-                        "in vec3 phongDiffuseCol,\n" +
-                        "in vec3 phongSpecularCol,\n" +
-                        "float phongShininess\n" +
-                        ") {\n" +
-                        "    vec3 color = phongDiffuseCol;\n" +
-                        "    vec3 reflectDir = reflect(-lightDir, normal);\n" +
-                        "    float specDot = max(dot(reflectDir, viewDir), 0.0);\n" +
-                        "    color += pow(specDot, phongShininess) * phongSpecularCol;\n" +
-                        "    return color;\n" +
-                        "}\n" +
-                        "\n" +
-                        "void main() {\n" +
-                        "    if (shading) {\n" +
-                        "        vec3 n = normalize(normal);\n" +
-                        "        vec3 lightDir = normalize(-lightDirection);\n" +
-                        "        vec3 viewDir = normalize(-vertPos);\n" +
-                        "\n" +
-                        "        vec3 textureColor = texture(myTexture, forFragTexCoord).rgb;\n" +
-                        "        vec3 diffuseColor = forFragColor * textureColor;\n" +
-                        "        diffuseColor = pow(diffuseColor, vec3(2.2));\n" +
-                        "        vec3 radiance = ambientLight * diffuseColor;\n" +
-                        "\n" +
-                        "        float irradiance = max(dot(lightDir, n), 0.0) * irradiPerp;\n" +
-                        "        if (irradiance > 0.0) {\n" +
-                        "            vec3 brdf = phongBRDF(lightDir, viewDir, n, diffuseColor, specularColor, shininess);\n" +
-                        "            radiance += brdf * irradiance * lightColor.rgb;\n" +
-                        "        }\n" +
-                        "\n" +
-                        "        radiance = pow(radiance, vec3(1.0 / 2.2));\n" +
-                        "        outputColor = vec4(radiance, 1.0);\n" +
-                        "    } else {\n" +
-                        "        vec3 textureColor = forFragColor * texture(myTexture, forFragTexCoord).rgb;\n" +
-                        "        outputColor = vec4(textureColor, 1.0);\n" +
-                        "    }\n" +
-                        "}\n"
+                """
+            #version 140
+              out vec4 outputColor;
+              
+              in vec2 forFragTexCoord;
+              in vec3 normal;
+              in vec3 vertPos;
+              in vec3 forFragColor;
+              
+              uniform sampler2D myTexture;
+              uniform vec3 lightDirection;
+              uniform float metallic;
+              uniform float roughness;
+              uniform bool shading;
+              
+              const vec3 ambientLight = vec3(0.1, 0.1, 0.1);
+              const float PI = 3.1415926535;
+              
+              // Fresnel-Schlick approximation for specular reflection
+              vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+                  return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+              }
+              
+              // GGX Normal Distribution Function (NDF)
+              float D_GGX(float NoH, float alpha) {
+                  float alpha2 = alpha * alpha;
+                  float denom = (NoH * NoH * (alpha2 - 1.0) + 1.0);
+                  return alpha2 / (PI * denom * denom);
+              }
+              
+              // Schlick-GGX approximation for geometry function
+              float G_SchlickGGX(float NdotV, float k) {
+                  return NdotV / (NdotV * (1.0 - k) + k);
+              }
+              
+              // Smith's geometry function combining light and view directions
+              float G_Smith(float NoV, float NoL, float k) {
+                  return G_SchlickGGX(NoV, k) * G_SchlickGGX(NoL, k);
+              }
+              
+              // GGX Microfacet BRDF implementation
+              vec3 ggxBRDF(vec3 L, vec3 V, vec3 N, vec3 baseColor, float metallic, float roughness) {
+                  vec3 H = normalize(V + L); // Halfway vector
+              
+                  // Dot products for various terms
+                  float NoV = max(dot(N, V), 0.0);
+                  float NoL = max(dot(N, L), 0.0);
+                  float NoH = max(dot(N, H), 0.0);
+                  float VoH = max(dot(V, H), 0.0);
+              
+                  // F0 for dielectric and metallic materials
+                  vec3 F0 = vec3(0.04); // Dielectric default reflectance
+                  F0 = mix(F0, baseColor, metallic); // Metallic material reflectance
+              
+                  // Fresnel term
+                  vec3 F = fresnelSchlick(VoH, F0);
+              
+                  // GGX Distribution term
+                  float alpha = roughness * roughness;
+                  float D = D_GGX(NoH, alpha);
+              
+                  // Geometry term
+                  float k = (roughness + 1.0) * (roughness + 1.0) / 8.0; // Simplified roughness scaling
+                  float G = G_Smith(NoV, NoL, k);
+              
+                  // Specular reflection component
+                  vec3 spec = (D * G * F) / max(4.0 * NoV * NoL, 0.001);
+              
+                  // Diffuse reflection component
+                  vec3 diffuse = (1.0 - F) * (1.0 - metallic) * baseColor / PI;
+              
+                  return diffuse + spec;
+              }
+              
+              void main() {
+                  if (shading) {
+                      // Normalize vectors
+                      vec3 N = normalize(normal);
+                      vec3 L = normalize(-lightDirection);
+                      vec3 V = normalize(-vertPos);
+              
+                      // Base color from texture and material color
+                      vec3 baseColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
+              
+                      // Ambient light contribution
+                      vec3 color = ambientLight * baseColor;
+              
+                      // Direct light contribution
+                      float NoL = max(dot(N, L), 0.0);
+                      if (NoL > 0.0) {
+                          color += ggxBRDF(L, V, N, baseColor, metallic, roughness) * NoL;
+                      }
+              
+                      outputColor = vec4(color, 1.0); // Final color output
+                  } else {
+                      // No shading, use texture and material color
+                      vec3 textureColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
+                      outputColor = vec4(textureColor, 1.0);
+                  }
+              }
+            
+            """
         };
 
         gl.glShaderSource(textVertID, 1, vs, null, 0);
@@ -1002,9 +1076,11 @@ class ShaderLoader {
         texLoc = gl.glGetUniformLocation(progID, "myTexture");
         lightDirectionLoc = gl.glGetUniformLocation(progID, "lightDirection");
         shadingLoc = gl.glGetUniformLocation(progID, "shading");
+        metallicLoc = gl.glGetUniformLocation(progID, "metallic");
+        roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
     }
 
-    static void printShaderInfoLog(GLAutoDrawable d, int obj) {
+    private static void printShaderInfoLog(GLAutoDrawable d, int obj) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
         IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
         int infoLogLength;
@@ -1019,7 +1095,7 @@ class ShaderLoader {
         }
     }
 
-    static void printProgramInfoLog(GLAutoDrawable d, int obj) {
+    private static void printProgramInfoLog(GLAutoDrawable d, int obj) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
         IntBuffer infoLogLengthBuf = IntBuffer.allocate(1);
         int infoLogLength;
@@ -1034,7 +1110,7 @@ class ShaderLoader {
         }
     }
 
-    public String[] loadShaderSrc(String name) {
+    private static String[] loadShaderSrc(String name) {
         StringBuilder sb = new StringBuilder();
         try {
             BufferedReader br = new BufferedReader(new FileReader(name));
