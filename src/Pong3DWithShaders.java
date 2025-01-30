@@ -411,20 +411,21 @@ abstract class GameObject {
             gl.glUniform1i(ShaderLoader.isShadowLoc, 0); // Disable shadow mode
         }
 
-        // **Step 2: Render Actual Object**
+        // Render Actual Object**
         renderObject(gl, false);
     }
 
-    /**
-     * Handles both normal object rendering and shadow rendering.
-     */
+
+    // Handles both normal object rendering and shadow rendering.
     private void renderObject(GL3 gl, boolean isShadow) {
         modelview.loadIdentity();
 
+        // Set the shadow object's position and size
         float shadowZOffset = -0.25f;
 
+        // Set the object's position and size
         if (isShadow) {
-            // ✅ Shadows are slightly behind the object and flattened
+            // Shadows are slightly behind the object
             modelview.translate(posX, posY, -1.92f + shadowZOffset, new Matrix4f());
             modelview.scale(sizeX * 0.9f, sizeY * 0.9f, 0.01f, new Matrix4f());
         } else {
@@ -433,12 +434,14 @@ abstract class GameObject {
             angleZ += rotationZ;
         }
 
+        // Rotate the object
         modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
         modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
         modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
 
         gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelview.get(new float[16]), 0);
 
+        // Set the object's color
         if (!isShadow) {
             modelview.transpose();
             modelview.invert();
@@ -451,6 +454,7 @@ abstract class GameObject {
             gl.glUniform1i(ShaderLoader.texLoc, 0);
         }
 
+        // Bind the vertex buffer
         gl.glBindBuffer(GL3.GL_ARRAY_BUFFER, vertBufID);
         int stride = (3 + 4 + 2 + 3) * Buffers.SIZEOF_FLOAT;
         int offset = 0;
@@ -458,6 +462,7 @@ abstract class GameObject {
         gl.glVertexAttribPointer(ShaderLoader.vertexLoc, 3, GL3.GL_FLOAT, false, stride, offset);
         gl.glEnableVertexAttribArray(ShaderLoader.vertexLoc);
 
+        // Bind the color buffer
         if (!isShadow) {
             offset = 3 * Buffers.SIZEOF_FLOAT;
             gl.glVertexAttribPointer(ShaderLoader.colorLoc, 4, GL3.GL_FLOAT, false, stride, offset);
@@ -479,16 +484,15 @@ abstract class GameObject {
             gl.glDrawArrays(GL3.GL_TRIANGLES, 0, vertNo);
         }
 
+        // Disable texture if not shadow
         if (!isShadow) {
             gl.glDisable(GL3.GL_TEXTURE_2D);
         }
     }
 
-    /**
-     * ✅ Only allow certain objects to cast shadows.
-     * This prevents unnecessary large rectangular shadows.
-     */
+    // Returns true if the object should cast a shadow
     private boolean shouldCastShadow() {
+        // Only the score, ball and the players cast shadows
         return (this instanceof Ball || this instanceof Player || this instanceof Score);
     }
 
@@ -939,6 +943,7 @@ class ShaderLoader {
         uniform mat4 projection;
         uniform mat4 modelview;
         uniform mat4 normalMat;
+        // Shadow offset flag
         uniform bool isShadow;
 
         out vec3 forFragColor;
@@ -1060,6 +1065,7 @@ class ShaderLoader {
         }
 
         void main() {
+            // Set the output color to a default value for shadows
             if(isShadow) {
                 outputColor = vec4(0.1, 0.1, 0.1, 1.0);
                 return;
@@ -1151,6 +1157,7 @@ class ShaderLoader {
         shadingLoc = gl.glGetUniformLocation(progID, "shading");
         metallicLoc = gl.glGetUniformLocation(progID, "metallic");
         roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
+        // Shadow offset flag
         isShadowLoc = gl.glGetUniformLocation(progID, "isShadow");
     }
 
