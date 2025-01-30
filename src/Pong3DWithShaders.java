@@ -404,8 +404,8 @@ abstract class GameObject {
     float sizeX, sizeY, sizeZ;
 
     public void display(GL3 gl) {
-        // **Step 1: Render Shadows First (Only for Specific Objects)**
-        if (shouldCastShadow()) { // ✅ Only objects that need shadows will render them
+        // Render Shadows First (Only for Specific Objects)
+        if (shouldCastShadow()) { // Only objects that need shadows will render them
             gl.glUniform1i(ShaderLoader.isShadowLoc, 1); // Enable shadow mode
             renderObject(gl, true); // Render shadow
             gl.glUniform1i(ShaderLoader.isShadowLoc, 0); // Disable shadow mode
@@ -421,27 +421,21 @@ abstract class GameObject {
     private void renderObject(GL3 gl, boolean isShadow) {
         modelview.loadIdentity();
 
+        float shadowZOffset = -0.25f;
+
         if (isShadow) {
-            float shadowZOffset = -0.25f; // Slightly behind the object
+            // ✅ Shadows are slightly behind the object and flattened
             modelview.translate(posX, posY, -1.92f + shadowZOffset, new Matrix4f());
-
-            // Fix shadow scaling & orientation
-            modelview.scale(sizeX * 0.9f, sizeY * 0.9f, 0.01f, new Matrix4f()); // ✅ Shadows correctly flattened
-
-            // ✅ Apply the same rotations as the actual object (fixes shadow facing upwards)
-            modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
-            modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
-            modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
+            modelview.scale(sizeX * 0.9f, sizeY * 0.9f, 0.01f, new Matrix4f());
         } else {
-            // **Normal Object Rendering**
             modelview.translate(posX, posY, -2.0f, new Matrix4f());
             modelview.scale(sizeX, sizeY, sizeZ, new Matrix4f());
             angleZ += rotationZ;
-            modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
-            modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
-            angleY += rotationY;
-            modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
         }
+
+        modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
+        modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
+        modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
 
         gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelview.get(new float[16]), 0);
 
@@ -450,9 +444,7 @@ abstract class GameObject {
             modelview.invert();
             gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, modelview.get(new float[16]), 0);
             gl.glUniform1i(ShaderLoader.shadingLoc, shading);
-        }
 
-        if (!isShadow) {
             gl.glEnable(GL3.GL_TEXTURE_2D);
             gl.glActiveTexture(GL3.GL_TEXTURE0);
             gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
@@ -480,6 +472,7 @@ abstract class GameObject {
             gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
         }
 
+        // **Render the object (same for shadow & actual object)**
         if (isBox) {
             gl.glDrawArrays(GL3.GL_QUADS, 0, vertNo);
         } else {
@@ -1158,6 +1151,7 @@ class ShaderLoader {
         shadingLoc = gl.glGetUniformLocation(progID, "shading");
         metallicLoc = gl.glGetUniformLocation(progID, "metallic");
         roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
+        isShadowLoc = gl.glGetUniformLocation(progID, "isShadow");
     }
 
     private static void printShaderInfoLog(GLAutoDrawable d, int obj) {
