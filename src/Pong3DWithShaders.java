@@ -404,67 +404,99 @@ abstract class GameObject {
     float sizeX, sizeY, sizeZ;
 
     public void display(GL3 gl) {
-        // setup modelview transformation
+        // **Step 1: Render Shadows First (Only for Specific Objects)**
+        if (shouldCastShadow()) { // ✅ Only objects that need shadows will render them
+            gl.glUniform1i(ShaderLoader.isShadowLoc, 1); // Enable shadow mode
+            renderObject(gl, true); // Render shadow
+            gl.glUniform1i(ShaderLoader.isShadowLoc, 0); // Disable shadow mode
+        }
+
+        // **Step 2: Render Actual Object**
+        renderObject(gl, false);
+    }
+
+    /**
+     * Handles both normal object rendering and shadow rendering.
+     */
+    private void renderObject(GL3 gl, boolean isShadow) {
         modelview.loadIdentity();
-        modelview.translate(posX, posY, -2.0f, new Matrix4f());
-        modelview.scale(sizeX, sizeY, sizeZ, new Matrix4f());
-        angleZ += rotationZ;
-        modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
-        modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
-        angleY += rotationY;
-        modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
+
+        if (isShadow) {
+            float shadowZOffset = -0.25f; // Slightly behind the object
+            modelview.translate(posX, posY, -1.92f + shadowZOffset, new Matrix4f());
+
+            // Fix shadow scaling & orientation
+            modelview.scale(sizeX * 0.9f, sizeY * 0.9f, 0.01f, new Matrix4f()); // ✅ Shadows correctly flattened
+
+            // ✅ Apply the same rotations as the actual object (fixes shadow facing upwards)
+            modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
+            modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
+            modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
+        } else {
+            // **Normal Object Rendering**
+            modelview.translate(posX, posY, -2.0f, new Matrix4f());
+            modelview.scale(sizeX, sizeY, sizeZ, new Matrix4f());
+            angleZ += rotationZ;
+            modelview.rotate((float) Math.toRadians(angleX), 1, 0, 0, new Matrix4f());
+            modelview.rotate((float) Math.toRadians(angleY), 0, 1, 0, new Matrix4f());
+            angleY += rotationY;
+            modelview.rotate((float) Math.toRadians(angleZ), 0, 0, 1, new Matrix4f());
+        }
+
         gl.glUniformMatrix4fv(ShaderLoader.modelviewLoc, 1, false, modelview.get(new float[16]), 0);
 
-        // rotational part of the transformation
-        modelview.transpose();
-        modelview.invert();
-        gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, modelview.get(new float[16]), 0);
+        if (!isShadow) {
+            modelview.transpose();
+            modelview.invert();
+            gl.glUniformMatrix4fv(ShaderLoader.normalMatLoc, 1, false, modelview.get(new float[16]), 0);
+            gl.glUniform1i(ShaderLoader.shadingLoc, shading);
+        }
 
-        // disable shading for the skybox
-        gl.glUniform1i(ShaderLoader.shadingLoc, shading);
+        if (!isShadow) {
+            gl.glEnable(GL3.GL_TEXTURE_2D);
+            gl.glActiveTexture(GL3.GL_TEXTURE0);
+            gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
+            gl.glUniform1i(ShaderLoader.texLoc, 0);
+        }
 
-        // setup texture
-        gl.glEnable(GL3.GL_TEXTURE_2D);
-        // activate texture unit 0
-        gl.glActiveTexture(GL3.GL_TEXTURE0);
-        // bind texture
-        gl.glBindTexture(GL3.GL_TEXTURE_2D, texID);
-        // inform the shader to use texture unit 0
-        gl.glUniform1i(ShaderLoader.texLoc, 0);
-
-
-        // activate VBO
         gl.glBindBuffer(GL3.GL_ARRAY_BUFFER, vertBufID);
         int stride = (3 + 4 + 2 + 3) * Buffers.SIZEOF_FLOAT;
         int offset = 0;
 
-        // position
         gl.glVertexAttribPointer(ShaderLoader.vertexLoc, 3, GL3.GL_FLOAT, false, stride, offset);
         gl.glEnableVertexAttribArray(ShaderLoader.vertexLoc);
 
-        // color
-        offset = 3 * Buffers.SIZEOF_FLOAT;
-        gl.glVertexAttribPointer(ShaderLoader.colorLoc, 4, GL3.GL_FLOAT, false, stride, offset);
-        gl.glEnableVertexAttribArray(ShaderLoader.colorLoc);
+        if (!isShadow) {
+            offset = 3 * Buffers.SIZEOF_FLOAT;
+            gl.glVertexAttribPointer(ShaderLoader.colorLoc, 4, GL3.GL_FLOAT, false, stride, offset);
+            gl.glEnableVertexAttribArray(ShaderLoader.colorLoc);
 
-        // texture
-        offset = (3 + 4) * Buffers.SIZEOF_FLOAT;
-        gl.glVertexAttribPointer(ShaderLoader.texCoordLoc, 2, GL3.GL_FLOAT, false, stride, offset);
-        gl.glEnableVertexAttribArray(ShaderLoader.texCoordLoc);
+            offset = (3 + 4) * Buffers.SIZEOF_FLOAT;
+            gl.glVertexAttribPointer(ShaderLoader.texCoordLoc, 2, GL3.GL_FLOAT, false, stride, offset);
+            gl.glEnableVertexAttribArray(ShaderLoader.texCoordLoc);
 
-        // normals
-        offset = (3 + 4 + 2) * Buffers.SIZEOF_FLOAT;
-        gl.glVertexAttribPointer(ShaderLoader.normalLoc, 3, GL3.GL_FLOAT, false, stride, offset);
-        gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
+            offset = (3 + 4 + 2) * Buffers.SIZEOF_FLOAT;
+            gl.glVertexAttribPointer(ShaderLoader.normalLoc, 3, GL3.GL_FLOAT, false, stride, offset);
+            gl.glEnableVertexAttribArray(ShaderLoader.normalLoc);
+        }
 
         if (isBox) {
             gl.glDrawArrays(GL3.GL_QUADS, 0, vertNo);
         } else {
-            // render data
             gl.glDrawArrays(GL3.GL_TRIANGLES, 0, vertNo);
         }
 
-        gl.glDisable(GL3.GL_TEXTURE_2D);
+        if (!isShadow) {
+            gl.glDisable(GL3.GL_TEXTURE_2D);
+        }
+    }
+
+    /**
+     * ✅ Only allow certain objects to cast shadows.
+     * This prevents unnecessary large rectangular shadows.
+     */
+    private boolean shouldCastShadow() {
+        return (this instanceof Ball || this instanceof Player || this instanceof Score);
     }
 
     public void update() {
@@ -891,6 +923,7 @@ class ShaderLoader {
     static int shadingLoc = 0;
     static int metallicLoc = 0;
     static int roughnessLoc = 0;
+    static int isShadowLoc = 0;
 
     public static void setupShaders(GLAutoDrawable d) {
         GL3 gl = d.getGL().getGL3(); // get the OpenGL 3 graphics context
@@ -900,135 +933,182 @@ class ShaderLoader {
 
         metallicLoc = gl.glGetUniformLocation(progID, "metallic");
         roughnessLoc = gl.glGetUniformLocation(progID, "roughness");
+        isShadowLoc = gl.glGetUniformLocation(progID, "isShadow");
 
         String[] vs = new String[]{
-            """
-                #version 140
-                in vec3 inputPosition;
-                in vec4 inputColor;
-                in vec2 inputTexCoord;
-                in vec3 inputNormal;
-                uniform mat4 projection;
-                uniform mat4 modelview;
-                uniform mat4 normalMat;
-                out vec3 forFragColor;
-                out vec2 forFragTexCoord;
-                out vec3 normal;
-                out vec3 vertPos;
-                void main(){
-                    forFragColor = inputColor.rgb;
-                    forFragTexCoord = inputTexCoord;
-                    normal = (normalMat * vec4(inputNormal, 0.0)).xyz;
-                    vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);
-                    vertPos = vec3(vertPos4) / vertPos4.w;
-                    gl_Position =  projection * modelview * vec4(inputPosition, 1.0);
-                }
-            """
+                """
+        #version 140
+        in vec3 inputPosition;
+        in vec4 inputColor;
+        in vec2 inputTexCoord;
+        in vec3 inputNormal;
+
+        uniform mat4 projection;
+        uniform mat4 modelview;
+        uniform mat4 normalMat;
+        uniform bool isShadow;
+
+        out vec3 forFragColor;
+        out vec2 forFragTexCoord;
+        out vec3 normal;
+        out vec3 vertPos;
+
+        void main() {
+            // Pass the color input to the fragment shader
+            forFragColor = inputColor.rgb;
+
+            // Pass the texture coordinates to the fragment shader
+            forFragTexCoord = inputTexCoord;
+
+            // Transform the normal vector with the normal matrix
+            normal = (normalMat * vec4(inputNormal, 0.0)).xyz;
+
+            // Calculate the vertex position in world space
+            vec4 vertPos4 = modelview * vec4(inputPosition, 1.0);
+
+            // Convert the homogeneous coordinates to 3D
+            vertPos = vec3(vertPos4) / vertPos4.w;
+
+            // Compute the final clip-space position
+            gl_Position = projection * vertPos4;
+            
+            // Offset shadow behind the object
+            if (isShadow) {
+                gl_Position.z -= 0.25;  // Offset shadow behind the object
+            }
+        }
+    """
         };
 
         String[] fs = new String[]{
                 """
-            #version 140
-              out vec4 outputColor;
-              
-              in vec2 forFragTexCoord;
-              in vec3 normal;
-              in vec3 vertPos;
-              in vec3 forFragColor;
-              
-              uniform sampler2D myTexture;
-              uniform vec3 lightDirection;
-              uniform float metallic;
-              uniform float roughness;
-              uniform bool shading;
-              
-              const vec3 ambientLight = vec3(0.1, 0.1, 0.1);
-              const float PI = 3.1415926535;
-              
-              // Fresnel-Schlick approximation for specular reflection
-              vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-                  return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-              }
-              
-              // GGX Normal Distribution Function (NDF)
-              float D_GGX(float NoH, float alpha) {
-                  float alpha2 = alpha * alpha;
-                  float denom = (NoH * NoH * (alpha2 - 1.0) + 1.0);
-                  return alpha2 / (PI * denom * denom);
-              }
-              
-              // Schlick-GGX approximation for geometry function
-              float G_SchlickGGX(float NdotV, float k) {
-                  return NdotV / (NdotV * (1.0 - k) + k);
-              }
-              
-              // Smith's geometry function combining light and view directions
-              float G_Smith(float NoV, float NoL, float k) {
-                  return G_SchlickGGX(NoV, k) * G_SchlickGGX(NoL, k);
-              }
-              
-              // GGX Microfacet BRDF implementation
-              vec3 ggxBRDF(vec3 L, vec3 V, vec3 N, vec3 baseColor, float metallic, float roughness) {
-                  vec3 H = normalize(V + L); // Halfway vector
-              
-                  // Dot products for various terms
-                  float NoV = max(dot(N, V), 0.0);
-                  float NoL = max(dot(N, L), 0.0);
-                  float NoH = max(dot(N, H), 0.0);
-                  float VoH = max(dot(V, H), 0.0);
-              
-                  // F0 for dielectric and metallic materials
-                  vec3 F0 = vec3(0.04); // Dielectric default reflectance
-                  F0 = mix(F0, baseColor, metallic); // Metallic material reflectance
-              
-                  // Fresnel term
-                  vec3 F = fresnelSchlick(VoH, F0);
-              
-                  // GGX Distribution term
-                  float alpha = roughness * roughness;
-                  float D = D_GGX(NoH, alpha);
-              
-                  // Geometry term
-                  float k = (roughness + 1.0) * (roughness + 1.0) / 8.0; // Simplified roughness scaling
-                  float G = G_Smith(NoV, NoL, k);
-              
-                  // Specular reflection component
-                  vec3 spec = (D * G * F) / max(4.0 * NoV * NoL, 0.001);
-              
-                  // Diffuse reflection component
-                  vec3 diffuse = (1.0 - F) * (1.0 - metallic) * baseColor / PI;
-              
-                  return diffuse + spec;
-              }
-              
-              void main() {
-                  if (shading) {
-                      // Normalize vectors
-                      vec3 N = normalize(normal);
-                      vec3 L = normalize(-lightDirection);
-                      vec3 V = normalize(-vertPos);
-              
-                      // Base color from texture and material color
-                      vec3 baseColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
-              
-                      // Ambient light contribution
-                      vec3 color = ambientLight * baseColor;
-              
-                      // Direct light contribution
-                      float NoL = max(dot(N, L), 0.0);
-                      if (NoL > 0.0) {
-                          color += ggxBRDF(L, V, N, baseColor, metallic, roughness) * NoL;
-                      }
-              
-                      outputColor = vec4(color, 1.0); // Final color output
-                  } else {
-                      // No shading, use texture and material color
-                      vec3 textureColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
-                      outputColor = vec4(textureColor, 1.0);
-                  }
-              }
-            
-            """
+        #version 140
+        out vec4 outputColor;
+
+        in vec2 forFragTexCoord;
+        in vec3 normal;
+        in vec3 vertPos;
+        in vec3 forFragColor;
+
+        uniform sampler2D myTexture;
+        uniform vec3 lightDirection;
+        uniform float metallic;
+        uniform float roughness;
+        uniform bool shading;
+        uniform bool isShadow;
+
+        const vec3 ambientLight = vec3(0.1, 0.1, 0.1); // Base ambient light contribution
+        const float PI = 3.14159265359; // Constant value for PI
+
+        // Fresnel-Schlick approximation for the specular reflection
+        vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+            // Calculate the Fresnel term using a fifth-power polynomial approximation
+            return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+        }
+
+        // GGX Normal Distribution Function (NDF) for surface microfacet distribution
+        float D_GGX(float NoH, float alpha) {
+            // Squared roughness for distribution
+            float alpha2 = alpha * alpha;
+
+            // Denominator calculation based on the GGX model
+            float denom = (NoH * NoH * (alpha2 - 1.0) + 1.0);
+
+            // Return the GGX distribution value
+            return alpha2 / (PI * denom * denom);
+        }
+
+        // Schlick-GGX approximation for geometry attenuation factor
+        float G_SchlickGGX(float NdotV, float k) {
+            // Compute the geometry term for a single direction
+            return NdotV / (NdotV * (1.0 - k) + k);
+        }
+
+        // Smith's geometry function combining view and light directions
+        float G_Smith(float NoV, float NoL, float k) {
+            // Combine the geometry terms for both view and light directions
+            return G_SchlickGGX(NoV, k) * G_SchlickGGX(NoL, k);
+        }
+
+        // GGX Microfacet BRDF implementation
+        vec3 ggxBRDF(vec3 L, vec3 V, vec3 N, vec3 baseColor, float metallic, float roughness) {
+            // Calculate the halfway vector between light and view directions
+            vec3 H = normalize(V + L);
+
+            // Compute dot products for the BRDF terms
+            float NoV = max(dot(N, V), 0.0);
+            float NoL = max(dot(N, L), 0.0);
+            float NoH = max(dot(N, H), 0.0);
+            float VoH = max(dot(V, H), 0.0);
+
+            // Calculate the base reflectance for the material
+            vec3 F0 = vec3(0.04);
+            F0 = mix(F0, baseColor, metallic);
+
+            // Compute the Fresnel term for the specular reflection
+            vec3 F = fresnelSchlick(VoH, F0);
+
+            // Compute the GGX distribution term
+            float alpha = roughness * roughness;
+            float D = D_GGX(NoH, alpha);
+
+            // Compute the geometry attenuation term
+            float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+            float G = G_Smith(NoV, NoL, k);
+
+            // Calculate the specular reflection component
+            vec3 spec = (D * G * F) / max(4.0 * NoV * NoL, 0.001);
+
+            // Calculate the diffuse reflection component for non-metallic surfaces
+            vec3 diffuse = (1.0 - F) * (1.0 - metallic) * baseColor / PI;
+
+            // Combine the diffuse and specular components
+            return diffuse + spec;
+        }
+
+        void main() {
+            if(isShadow) {
+                outputColor = vec4(0.1, 0.1, 0.1, 1.0);
+                return;
+            }
+            // Check if shading is enabled
+            if (shading) {
+                // Normalize the interpolated normal vector
+                vec3 N = normalize(normal);
+
+                // Calculate the light direction vector
+                vec3 L = normalize(-lightDirection);
+
+                // Calculate the view direction vector
+                vec3 V = normalize(-vertPos);
+
+                // Sample the base texture color and modulate with vertex color
+                vec3 baseColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
+
+                // Initialize the output color with ambient light contribution
+                vec3 color = ambientLight * baseColor;
+
+                // Calculate the dot product of normal and light direction
+                float NoL = max(dot(N, L), 0.0);
+
+                // If the light is affecting the surface
+                if (NoL > 0.0) {
+                    // Add the direct light contribution using the GGX BRDF
+                    color += ggxBRDF(L, V, N, baseColor, metallic, roughness) * NoL;
+                }
+
+                // Set the final computed color with alpha set to 1.0
+                outputColor = vec4(color, 1.0);
+
+            } else {
+                // When shading is disabled, use only the texture and vertex color
+                vec3 textureColor = vec3(texture(myTexture, forFragTexCoord)) * forFragColor;
+
+                // Set the final output color with alpha set to 1.0
+                outputColor = vec4(textureColor, 1.0);
+            }
+        }
+    """
         };
 
         gl.glShaderSource(textVertID, 1, vs, null, 0);
