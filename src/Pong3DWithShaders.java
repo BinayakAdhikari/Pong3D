@@ -485,6 +485,18 @@ class Game extends KeyAdapter {
                 if (shading > 2) {
                     shading = 0;
                 }
+
+                switch (shading) {
+                    case 0:
+                        System.out.println("Using: PBR (Default) Shader");
+                        break;
+                    case 1:
+                        System.out.println("Using: Toon Shader");
+                        break;
+                    case 2:
+                        System.out.println("Using: Noise Shader");
+                        break;
+                }
         }
     }
 
